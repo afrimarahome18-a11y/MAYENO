@@ -1,0 +1,16 @@
+# Mayen-App
+
+TikTok-like short video app with monetization, ads, and analytics.
+
+## Structure
+
+- backend/ → Node.js + Express + PostgreSQL
+- frontend/ → React Native (Expo or CLI)
+- .github/workflows/ → CI/CD deployment scripts
+- docker-compose.yml → optional local setup with Postgres
+
+## Branching
+
+- main → production
+- develop → staging
+- feature/... → new features
