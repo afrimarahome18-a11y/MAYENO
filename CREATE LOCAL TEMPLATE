@@ -1,0 +1,33 @@
+Mayen-App/
+│
+├─ backend/
+│   ├─ server.js
+│   ├─ billing.js
+│   ├─ ads.js
+│   ├─ analytics.js
+│   ├─ worker.js
+│   ├─ db.js
+│   ├─ package.json
+│   └─ .env.example
+│
+├─ frontend/
+│   ├─ App.js
+│   ├─ screens/
+│   │   ├─ WalletScreen.js
+│   │   ├─ BuyCoinsScreen.js
+│   │   ├─ WithdrawScreen.js
+│   │   ├─ GiftSendScreen.js
+│   │   └─ CreatorDashboard.js
+│   ├─ components/
+│   │   ├─ ui/
+│   │   │   ├─ Button.js
+│   │   │   └─ Card.js
+│   │   ├─ Ads.js
+│   │   └─ ChartSimple.js
+│   ├─ package.json
+│   └─ .env.example
+│
+├─ docker-compose.yml
+├─ .gitignore
+├─ README.md
+└─ .github/workflows/deploy-staging.yml
