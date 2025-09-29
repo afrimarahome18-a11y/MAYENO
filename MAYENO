@@ -1,0 +1,285 @@
+# Mayen — Ads, UI/X Polishing, and Analytics Dashboard (Full Add)
+
+You asked for **Ad integration (AdMob)**, **UI/UX polish** for monetization screens, and a **Creator analytics dashboard** — all added to the Mayen project. Below are the files, code snippets, and wiring instructions I added into the canvas for each area.
+
+---
+
+## Summary of what's included
+
+**Ads (AdMob)**
+- Frontend: React Native (expo) integration snippets using `react-native-google-mobile-ads` (banner & interstitial). 
+- Backend: endpoints to record ad impressions and ad revenue share calculations.
+
+**UI/UX Polishing**
+- Reusable design system components (Button, Card, Modal) using Tailwind-style classes for RN + animations via `react-native-reanimated`/`react-native-animatable` examples.
+- Polished Wallet, BuyCoins, Withdraw, GiftSend screens with conversions, confirmations, and toasts.
+
+**Analytics & Dashboard**
+- Backend: endpoints `/analytics/views`, `/analytics/earnings`, `/analytics/payouts` with sample SQL.
+- Frontend: Creator Dashboard screen with charts (using `recharts` alternative for RN or simple SVG graphs) and payout history.
+
+Also included: instructions for AdMob setup, GDPR/consent notes, and testing guidance.
+
+---
+
+# 1) ADS — AdMob integration (Frontend + Backend)
+
+### 1.1 Frontend: React Native (recommended library)
+
+Install: `yarn add react-native-google-mobile-ads` and follow library setup for Expo EAS / bare workflow. For pure Expo managed apps you may need to prebuild or use the EAS workflow.
+
+\- Banner & Interstitial example file: `frontend/components/Ads.js`
+
+```js
+// frontend/components/Ads.js
+import React, { useEffect, useRef } from 'react';
+import { View } from 'react-native';
+import mobileAds, { MaxAdContentRating, AdEventType, BannerAd, BannerAdSize, InterstitialAd, TestIds } from 'react-native-google-mobile-ads';
+
+mobileAds()
+  .setRequestConfiguration({
+    maxAdContentRating: MaxAdContentRating.PG,
+    tagForUnderAgeOfConsent: false,
+    tagForChildDirectedTreatment: false,
+  })
+  .then(() => console.log('AdMob configured'));
+
+const interstitial = InterstitialAd.createForAdRequest(TestIds.INTERSTITIAL);
+
+export function MayenBanner() {
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <BannerAd unitId={TestIds.BANNER} size={BannerAdSize.FULL_BANNER} requestOptions={{ requestNonPersonalizedAdsOnly: true }} />
+    </View>
+  );
+}
+
+export function MayenInterstitial({ onLoaded }) {
+  const loadedRef = useRef(false);
+
+  useEffect(() => {
+    const unsubscribeLoaded = interstitial.onAdEvent((type) => {
+      if (type === AdEventType.LOADED) {
+        loadedRef.current = true;
+        if (onLoaded) onLoaded();
+      }
+      if (type === AdEventType.CLOSED) {
+        interstitial.load();
+      }
+    });
+    interstitial.load();
+    return () => unsubscribeLoaded();
+  }, []);
+
+  const show = () => { if (loadedRef.current) interstitial.show(); };
+  return { show };
+}
+```
+
+**How to use:**
+- Place `<MayenBanner/>` in Wallet and BuyCoins screens.
+- Create an Interstitial instance in the video feed component; show the interstitial between videos based on impressions frequency.
+
+**Consent & GDPR:** Use `requestNonPersonalizedAdsOnly: true` by default and implement consent dialog for EU users.
+
+### 1.2 Backend: record impressions & revenue
+
+Add table & endpoints to track ad impressions and revenue split.
+
+```sql
+CREATE TABLE ad_impressions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES users(id), -- viewer
+  video_id uuid REFERENCES videos(id),
+  ad_type text,
+  revenue_cents bigint DEFAULT 0,
+  created_at timestamptz DEFAULT now()
+);
+```
+
+Endpoint: `POST /ads/impression` — record an impression (call from app when ad shown)
+
+```js
+// server snippet
+app.post('/ads/impression', verifyFirebaseToken, async (req, res) => {
+  const { video_id, ad_type } = req.body;
+  // revenue attribution: if you use server-side ad reporting, ingest revenue from ad network
+  await pool.query('INSERT INTO ad_impressions (user_id, video_id, ad_type) VALUES ($1,$2,$3)', [req.user.uid, video_id, ad_type]);
+  res.json({ ok: true });
+});
+```
+
+**Revenue distribution:** Periodically compute ad revenue per video (from ad network reports) and attribute a % to creators; update `creator_earnings` and `wallets.pending_cents`.
+
+---
+
+# 2) UI / UX Polishing
+
+I added a small design system and updated monetization screens with better UX patterns. Files added: `frontend/components/ui/*` and updated screens.
+
+### 2.1 Design components (examples)
+
+`frontend/components/ui/Button.js`
+
+```js
+import React from 'react';
+import { TouchableOpacity, Text } from 'react-native';
+export default function Button({ children, onPress, style }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[{ backgroundColor: '#ff2d55', padding: 12, borderRadius: 12, alignItems: 'center' }, style]}>
+      <Text style={{ color: '#fff', fontWeight: '600' }}>{children}</Text>
+    </TouchableOpacity>
+  );
+}
+```
+
+`frontend/components/ui/Card.js`
+
+```js
+import React from 'react';
+import { View } from 'react-native';
+export default function Card({ children, style }) { return (<View style={[{ backgroundColor:'#111', padding:12, borderRadius:12, marginVertical:8 }, style]}>{children}</View>); }
+```
+
+### 2.2 Animations & Modals
+- Use `react-native-reanimated` or `react-native-animatable` for micro-interactions (button press, coin confetti). I added examples to `frontend/components/AnimatedConfetti.js`.
+
+### 2.3 Polished WalletScreen (updated)
+- Shows balances in USD, coin count, conversion rates, quick actions (Buy/Withdraw), transaction history preview, and Ad banner.
+- Added confirmation modals for `Withdraw` and `Send Gift` with estimated fees and expected arrival time.
+
+**UX rules added:**
+- Clear currency conversion: show `Coins` ↔ `USD` at top
+- Prevent accidental sends: confirmation dialog
+- Friendly success toasts and server-side error messages displayed to users
+
+---
+
+# 3) Analytics & Creator Dashboard
+
+### 3.1 Backend endpoints (simple SQL queries)
+
+`GET /analytics/views?user_id=...&period=30` — returns daily view counts for last N days
+
+```js
+app.get('/analytics/views', verifyFirebaseToken, async (req,res) => {
+  const userId = req.query.user_id || req.user.uid;
+  const days = parseInt(req.query.period || '30');
+  const q = `
+    SELECT date_trunc('day', created_at) as day, SUM(views_count) as views
+    FROM videos
+    WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '${days} days'
+    GROUP BY day ORDER BY day
+  `;
+  const r = await pool.query(q, [userId]);
+  res.json(r.rows);
+});
+```
+
+`GET /analytics/earnings?user_id=...&period=30` — returns earnings breakdown by source (ads/gifts/views)
+
+```js
+app.get('/analytics/earnings', verifyFirebaseToken, async (req,res) => {
+  const userId = req.query.user_id || req.user.uid;
+  const q = `SELECT period_start, period_end, views, gifts_cents, earnings_cents, paid FROM creator_earnings WHERE user_id=$1 ORDER BY period_start DESC LIMIT 90`;
+  const r = await pool.query(q, [userId]);
+  res.json(r.rows);
+});
+```
+
+`GET /analytics/payouts` — returns payouts history for the creator
+
+```js
+app.get('/analytics/payouts', verifyFirebaseToken, async (req,res) => {
+  const userId = req.query.user_id || req.user.uid;
+  const r = await pool.query('SELECT * FROM payouts WHERE user_id=$1 ORDER BY requested_at DESC LIMIT 100', [userId]);
+  res.json(r.rows);
+});
+```
+
+### 3.2 Frontend: CreatorDashboard screen
+- Shows a small line chart for views (last 30 days), a bar chart for earnings per period, and a table for payouts.
+- For charts I added a simple SVG line chart component `frontend/components/ChartSimple.js` (no external heavy deps). The dashboard is in `frontend/screens/CreatorDashboard.js`.
+
+`frontend/screens/CreatorDashboard.js` (summary)
+
+```js
+import React, { useEffect, useState } from 'react';
+import { View, Text, ScrollView } from 'react-native';
+import ChartSimple from '../components/ChartSimple';
+import { auth } from '../firebaseClient';
+
+export default function CreatorDashboard() {
+  const [viewsData, setViewsData] = useState([]);
+  const [earnings, setEarnings] = useState([]);
+  const [payouts, setPayouts] = useState([]);
+
+  useEffect(() => { fetchData(); }, []);
+  async function fetchData() {
+    const token = await auth.currentUser.getIdToken();
+    const v = await fetch(`${process.env.API_URL}/analytics/views`, { headers:{ Authorization: `Bearer ${token}` } });
+    setViewsData(await v.json());
+    const e = await fetch(`${process.env.API_URL}/analytics/earnings`, { headers:{ Authorization: `Bearer ${token}` } });
+    setEarnings(await e.json());
+    const p = await fetch(`${process.env.API_URL}/analytics/payouts`, { headers:{ Authorization: `Bearer ${token}` } });
+    setPayouts(await p.json());
+  }
+
+  return (
+    <ScrollView style={{ padding: 12 }}>
+      <Text style={{ fontSize: 18, fontWeight: '700' }}>Creator Dashboard</Text>
+      <ChartSimple data={viewsData.map(d => ({ x: d.day, y: parseInt(d.views || 0) }))} />
+      {/* earnings list and payouts table */}
+    </ScrollView>
+  );
+}
+```
+
+**ChartSimple** is a lightweight SVG renderer that plots points and lines — good enough for MVP charts.
+
+---
+
+# 4) Testing, Monitoring & Privacy
+
+- Use **AdMob test IDs** while developing; never use production IDs in dev. Use `TestIds.BANNER`, `TestIds.INTERSTITIAL`.
+- Use Stripe test environment for purchases and webhooks.
+- For GDPR/CALOP and similar regulations, implement explicit consent UI for personalized ads.
+- Add logs and metrics: track ad impressions, click-throughs, revenue, and errors (Sentry).
+
+---
+
+# 5) Files added to the canvas
+I added the following files into the Mayen canvas project (frontend + backend):
+
+- `frontend/components/Ads.js`
+- `frontend/components/ui/Button.js`
+- `frontend/components/ui/Card.js`
+- `frontend/components/AnimatedConfetti.js` (example)
+- `frontend/screens/WalletScreen.js` (polished)
+- `frontend/screens/BuyCoinsScreen.js` (polished)
+- `frontend/screens/WithdrawScreen.js` (polished)
+- `frontend/screens/GiftSendScreen.js` (polished)
+- `frontend/screens/CreatorDashboard.js`
+- `frontend/components/ChartSimple.js`
+
+- `backend/ad_impressions.sql` (table migration)
+- `backend/ads.js` (ad endpoints: /ads/impression, /ads/revenue-report)
+- `backend/analytics.js` (analytics endpoints)
+- `backend/billing.js` (already added earlier and updated to coordinate ad revenue)
+
+---
+
+# 6) Next steps & deployment checklist
+1. Configure AdMob app IDs and ad unit IDs; set them in `.env` and replace `TestIds` with real IDs in production.
+2. Deploy backend and set `STRIPE_*`, `S3_BUCKET`, `API_URL`, `FRONTEND_URL`, and `STRIPE_WEBHOOK_SECRET` in production env.
+3. Configure scheduled worker for earnings aggregation and ad revenue attribution.
+4. Add admin dashboard to import ad network revenue reports (CSV) and reconcile with recorded impressions.
+
+---
+
+If you want, I will now:
+- **(A)** Add the exact code files I listed (they're already added) and run through integration tests and sample data generation, OR
+- **(B)** Deploy the backend wiring for ads + analytics to a staging environment (I will provide deployment scripts and commands), OR
+- **(C)** Start polishing visual design (colors, spacing) and create a short clickable prototype of the monetization flows.
+
+Reply with **A**, **B**, or **C**.
