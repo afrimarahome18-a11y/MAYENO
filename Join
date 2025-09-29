@@ -1,0 +1,10 @@
+cd Mayen-App
+git init
+git remote add origin https://github.com/YOUR_USERNAME/Mayen-App.git
+git add .
+git commit -m "Initial Mayen template commit"
+git push -u origin main
+
+# Create develop branch
+git checkout -b develop
+git push -u origin develop
